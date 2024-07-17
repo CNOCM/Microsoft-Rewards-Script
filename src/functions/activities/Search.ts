@@ -1,13 +1,7 @@
 import { Page } from 'playwright'
-import axios from 'axios'
 import { platform } from 'os'
-
 import { Workers } from '../Workers'
-
 import { Counters, DashboardData } from '../../interface/DashboardData'
-import { GoogleTrends } from '../../interface/GoogleDailyTrends'
-import { GoogleSearch } from '../../interface/Search'
-
 
 export class Search extends Workers {
 
@@ -27,21 +21,14 @@ export class Search extends Workers {
         }
 
         // Generate search queries
-        let googleSearchQueries = await this.getGoogleTrends(data.userProfile.attributes.country, missingPoints)
-        googleSearchQueries = this.bot.utils.shuffleArray(googleSearchQueries)
+        let queries = await this.getTrends(data.userProfile.attributes.country)
+        queries = this.bot.utils.shuffleArray(queries)
 
         // Deduplicate the search terms
-        googleSearchQueries = [...new Set(googleSearchQueries)]
+        queries = [...new Set(queries)]
 
-        // Go to bing
-        await page.goto(this.searchPageURL)
 
         let maxLoop = 0 // If the loop hits 10 this when not gaining any points, we're assuming it's stuck. If it ddoesn't continue after 5 more searches with alternative queries, abort search
-
-        const queries: string[] = []
-        // Mobile search doesn't seem to like related queries?
-        googleSearchQueries.forEach(x => { this.bot.isMobile ? queries.push(x.topic) : queries.push(x.topic, ...x.related) })
-
         // Loop over Google search queries
         for (let i = 0; i < queries.length; i++) {
             const query = queries[i] as string
@@ -89,10 +76,12 @@ export class Search extends Workers {
 
             let i = 0
             while (missingPoints > 0) {
-                const query = googleSearchQueries[i++] as GoogleSearch
+                const query = queries[i++]
+
+                if (!query) return
 
                 // Get related search terms to the Google search queries
-                const relatedTerms = await this.getRelatedTerms(query?.topic)
+                const relatedTerms = await this.getRelatedTerms(query)
                 if (relatedTerms.length > 3) {
                     // Search for the first 2 related terms
                     for (const term of relatedTerms.slice(1, 3)) {
@@ -134,7 +123,7 @@ export class Search extends Workers {
         // Try a max of 5 times
         for (let i = 0; i < 5; i++) {
             try {
-
+                await searchPage.goto(this.searchPageURL)
                 // Go to top of the page
                 await searchPage.evaluate(() => {
                     window.scrollTo(0, 0)
@@ -143,7 +132,7 @@ export class Search extends Workers {
                 await this.bot.utils.wait(500)
 
                 const searchBar = '#sb_form_q'
-                await searchPage.waitForSelector(searchBar, { state: 'visible', timeout: 10_000 })
+                await searchPage.waitForSelector(searchBar, { state: 'attached', timeout: 10_000 })
                 await searchPage.click(searchBar) // Focus on the textarea
                 await this.bot.utils.wait(500)
                 await searchPage.keyboard.down(platformControlKey)
@@ -189,42 +178,35 @@ export class Search extends Workers {
         return await this.bot.browser.func.getSearchPoints()
     }
 
-    private async getGoogleTrends(geoLocale: string, queryCount: number): Promise<GoogleSearch[]> {
-        const queryTerms: GoogleSearch[] = []
-        let i = 0
+    private async getTrends(geoLocale: string) {
+        const queryTerms: string[] = []
+        const keywordSource = ['toutiaohot', 'baiduhot', 'zhihuhot', 'douyinhot'];
+        geoLocale = (this.bot.config.searchSettings.useGeoLocaleQueries && geoLocale.length === 2) ? geoLocale.toUpperCase() : 'UNKONWN'
 
-        geoLocale = (this.bot.config.searchSettings.useGeoLocaleQueries && geoLocale.length === 2) ? geoLocale.toUpperCase() : 'US'
+        this.bot.log('SEARCH-TRENDS', `Generating search queries, can take a while! | GeoLocale: ${geoLocale}`)
 
-        this.bot.log('SEARCH-GOOGLE-TRENDS', `Generating search queries, can take a while! | GeoLocale: ${geoLocale}`)
-
-        while (queryCount > queryTerms.length) {
-            i += 1
-            const date = new Date()
-            date.setDate(date.getDate() - i)
-            const formattedDate = this.formatDate(date)
-
+        for (const keyword of keywordSource) {
             try {
+                const url = `https://tenapi.cn/v2/${keyword}`
                 const request = {
-                    url: `https://trends.google.com/trends/api/dailytrends?geo=${geoLocale}&hl=en&ed=${formattedDate}&ns=15`,
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json'
                     }
                 }
 
-                const response = await axios(request)
+                const response = await fetch(url, request)
 
-                const data: GoogleTrends = JSON.parse((await response.data).slice(5))
-
-                for (const topic of data.default.trendingSearchesDays[0]?.trendingSearches ?? []) {
-                    queryTerms.push({
-                        topic: topic.title.query.toLowerCase(),
-                        related: topic.relatedQueries.map(x => x.query.toLowerCase())
-                    })
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status); // 如果响应状态不是OK，则抛出错误
                 }
 
+                const { data } = (await response.json())
+
+                return data.map((item: { name: string }) => item.name) as string[]
+
             } catch (error) {
-                this.bot.log('SEARCH-GOOGLE-TRENDS', 'An error occurred:' + error, 'error')
+                this.bot.log('SEARCH-TRENDS', 'An error occurred:' + error, 'error')
             }
         }
 
@@ -233,29 +215,22 @@ export class Search extends Workers {
 
     private async getRelatedTerms(term: string): Promise<string[]> {
         try {
+            const url = `https://api.bing.com/osjson.aspx?query=${term}`
+
             const request = {
-                url: `https://api.bing.com/osjson.aspx?query=${term}`,
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json'
                 }
             }
 
-            const response = await axios(request)
+            const response = await fetch(url, request)
 
-            return response.data[1] as string[]
+            return (await response.json()).data[1] as string[]
         } catch (error) {
             this.bot.log('SEARCH-BING-RELTATED', 'An error occurred:' + error, 'error')
         }
         return []
-    }
-
-    private formatDate(date: Date): string {
-        const year = date.getFullYear()
-        const month = String(date.getMonth() + 1).padStart(2, '0')
-        const day = String(date.getDate()).padStart(2, '0')
-
-        return `${year}${month}${day}`
     }
 
     private async randomScroll(page: Page) {

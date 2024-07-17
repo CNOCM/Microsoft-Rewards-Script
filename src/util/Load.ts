@@ -9,17 +9,12 @@ import { Config } from '../interface/Config'
 
 
 export function loadAccounts(): Account[] {
+    //todo 单例模式
     try {
-        let file = 'accounts.json'
-
-        // If dev mode, use dev account(s)
-        if (process.argv.includes('-dev')) {
-            file = 'accounts.dev.json'
-        }
-
-        const accountDir = path.join(__dirname, '../', file)
+        const accountDir = path.resolve(process.env.ACCOUNTS_PATH || path.resolve('./accounts.json'))
         const accounts = fs.readFileSync(accountDir, 'utf-8')
 
+        
         return JSON.parse(accounts)
     } catch (error) {
         throw new Error(error as string)
@@ -28,9 +23,10 @@ export function loadAccounts(): Account[] {
 
 export function loadConfig(): Config {
     try {
-        const configDir = path.join(__dirname, '../', 'config.json')
+        const configDir = process.env.CONFIG_PATH || path.resolve('./config.json')
         const config = fs.readFileSync(configDir, 'utf-8')
 
+        
         return JSON.parse(config)
     } catch (error) {
         throw new Error(error as string)
@@ -39,9 +35,10 @@ export function loadConfig(): Config {
 
 export async function loadSessionData(sessionPath: string, email: string, isMobile: boolean, getFingerprint: boolean) {
     try {
+        const sessionDir = path.resolve(process.env.SESSIONS_DIR || './sessions')
         // Fetch cookie file
-        const cookieFile = path.join(__dirname, '../browser/', sessionPath, email, `${isMobile ? 'mobile_cookies' : 'desktop_cookies'}.json`)
-
+        const cookieFile = path.join(sessionDir, email, `${isMobile ? 'mobile_cookies' : 'desktop_cookies'}.json`)
+        
         let cookies: Cookie[] = []
         if (fs.existsSync(cookieFile)) {
             const cookiesData = await fs.promises.readFile(cookieFile, 'utf-8')
@@ -49,7 +46,7 @@ export async function loadSessionData(sessionPath: string, email: string, isMobi
         }
 
         // Fetch fingerprint file
-        const fingerprintFile = path.join(__dirname, '../browser/', sessionPath, email, `${isMobile ? 'mobile_fingerpint' : 'desktop_fingerpint'}.json`)
+        const fingerprintFile = path.join(sessionDir, email, `${isMobile ? 'mobile_fingerpint' : 'desktop_fingerpint'}.json`)
 
         let fingerprint!: BrowserFingerprintWithHeaders
         if (getFingerprint && fs.existsSync(fingerprintFile)) {
