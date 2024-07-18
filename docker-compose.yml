@@ -1,6 +1,7 @@
 services:
   microsoft-rewards-script:
     build: .
+    container_name: netsky
     environment:
       - TZ=America/Toronto #change to your local timezone
     restart: unless-stopped

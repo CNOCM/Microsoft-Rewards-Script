@@ -1,40 +1,27 @@
-# Use an official Node.js runtime as a base image
-FROM node:18
+FROM oven/bun:slim AS builder
 
-# Set the working directory in the container
-WORKDIR /usr/src/microsoft-rewards-script
+WORKDIR /MRS
 
-# Install jq, cron, and gettext-base
-RUN apt-get update && apt-get install -y jq cron gettext-base
-
-# Copy all files to the working directory
 COPY . .
 
-# Install dependencies including Playwright
-RUN apt-get install -y \
-    xvfb \
-    libgbm-dev \
-    libnss3 \
-    libasound2 \
-    libxss1 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    && rm -rf /var/lib/apt/lists/*
+RUN bun install --frozen-lockfile --ignore-scripts && bun run build
 
-# Install application dependencies
-RUN npm install
+FROM oven/bun:slim as prod
 
-# Build the script
-RUN npm run build
+WORKDIR /config
 
-# Install playwright chromium
-RUN npx playwright install chromium
+ENV NODE_ENV=production
+ENV ACCOUNTS_PATH=/config/accounts.json
+ENV CONFIG_PATH=/config/config.json
+ENV SESSIONS_DIR=/sessions
+ENV TimeZone=Asia/Shanghai
 
-# Copy cron file to cron directory
-COPY src/crontab.template /etc/cron.d/microsoft-rewards-cron.template
+RUN ln -snf /usr/share/zoneinfo/$TimeZone /etc/localtime && echo $TimeZone > /etc/timezone
 
-# Create the log file to be able to run tail
-RUN touch /var/log/cron.log
 
-# Define the command to run your application with cron optionally
-CMD sh -c 'node src/updateConfig.js && echo "$TZ" > /etc/timezone && dpkg-reconfigure -f noninteractive tzdata && if [ "$RUN_ON_START" = "true" ]; then npm start; fi && envsubst < /etc/cron.d/microsoft-rewards-cron.template > /etc/cron.d/microsoft-rewards-cron && crontab /etc/cron.d/microsoft-rewards-cron && cron && tail -f /var/log/cron.log'
+RUN bunx playwright install --with-deps chromium
+
+COPY --from=builder /MRS/dist/*  /MRS/
+COPY --from=builder /MRS/node_modules/  /MRS/node_modules/
+
+CMD ["bun", "/MRS/index.js"]
