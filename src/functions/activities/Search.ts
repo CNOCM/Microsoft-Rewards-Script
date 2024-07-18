@@ -179,39 +179,50 @@ export class Search extends Workers {
     }
 
     private async getTrends(geoLocale: string) {
-        const queryTerms: string[] = []
-        const keywordSource = ['toutiaohot', 'baiduhot', 'zhihuhot', 'douyinhot'];
-        geoLocale = (this.bot.config.searchSettings.useGeoLocaleQueries && geoLocale.length === 2) ? geoLocale.toUpperCase() : 'UNKONWN'
+        const queryTerms: string[] = [];
+        geoLocale = (this.bot.config.searchSettings.useGeoLocaleQueries && geoLocale.length === 2) ? geoLocale.toUpperCase() : 'UNKNOWN';
 
-        this.bot.log('SEARCH-TRENDS', `Generating search queries, can take a while! | GeoLocale: ${geoLocale}`)
+        this.bot.log('SEARCH-TRENDS', `Generating search queries, can take a while! | GeoLocale: ${geoLocale}`);
 
-        for (const keyword of keywordSource) {
-            try {
-                const url = `https://tenapi.cn/v2/${keyword}`
-                const request = {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
+        try {
+            const mainUrl = `https://tenapi.cn/v2/douyinhot`;
+            const backupUrl = `https://api-hot.efefee.cn/baidu`;
+            const request = {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
                 }
+            };
 
-                const response = await fetch(url, request)
+            const [mainResponse, backupResponse] = await Promise.all([
+                fetch(mainUrl, request).catch(() => null),
+                fetch(backupUrl, request).catch(() => null)
+            ]);
 
-                if (!response.ok) {
-                    throw new Error('HTTP error! status: ' + response.status); // 如果响应状态不是OK，则抛出错误
-                }
-
-                const { data } = (await response.json())
-
-                return data.map((item: { name: string }) => item.name) as string[]
-
-            } catch (error) {
-                this.bot.log('SEARCH-TRENDS', 'An error occurred:' + error, 'error')
+            if (mainResponse && mainResponse.ok) {
+                const { data } = await mainResponse.json();
+                this.bot.log('SEARCH-TRENDS', `Query terms from main request: ${data.length} items`);
+                queryTerms.push(...data.map((item: { name: string }) => item.name));
             }
-        }
 
-        return queryTerms
+            if (backupResponse && backupResponse.ok) {
+                const { data } = await backupResponse.json();
+                this.bot.log('SEARCH-TRENDS', `Query terms from backup request: ${data.length} items`);
+                queryTerms.push(...data.map((item: { title: string }) => item.title));
+            }
+
+            if (!mainResponse && !backupResponse) {
+                throw new Error('Both primary and backup requests failed.');
+            }
+
+            return queryTerms;
+
+        } catch (error) {
+            this.bot.log('SEARCH-TRENDS', 'An error occurred with the requests: ' + error, 'error');
+            return [];
+        }
     }
+
 
     private async getRelatedTerms(term: string): Promise<string[]> {
         try {
