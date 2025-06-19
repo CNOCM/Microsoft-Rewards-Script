@@ -29,6 +29,8 @@ export class Login {
     async login(page: Page, email: string, password: string) {
 
         try {
+            this.bot.log(this.bot.isMobile, 'LOGIN', 'Starting login process!')
+
             // Navigate to the Bing login page
             await page.goto('https://rewards.bing.com/signin')
 
@@ -39,7 +41,7 @@ export class Login {
             // Check if account is locked
             await this.checkAccountLocked(page)
 
-            const isLoggedIn = await page.waitForSelector('html[data-role-name="RewardsPortal"]', { timeout: 10_000 }).then(() => true).catch(() => false)
+            const isLoggedIn = await page.waitForSelector('html[data-role-name="RewardsPortal"]', { timeout: 10000 }).then(() => true).catch(() => false)
 
             if (!isLoggedIn) {
                 await this.execLogin(page, email, password)
@@ -86,26 +88,91 @@ export class Login {
     }
 
     private async enterEmail(page: Page, email: string) {
-        const emailPrefilled = await page.waitForSelector('#userDisplayName', { timeout: 2_000 }).catch(() => null)
-        if (emailPrefilled) {
-            this.bot.log(this.bot.isMobile, 'LOGIN', 'Email already prefilled by Microsoft')
-            return
-        }
+        const emailInputSelector = 'input[type="email"]'
 
-        await page.fill('#i0116', email)
-        await page.click('#idSIButton9')
-        this.bot.log(this.bot.isMobile, 'LOGIN', 'Email entered successfully')
+        try {
+            // Wait for email field
+            const emailField = await page.waitForSelector(emailInputSelector, { state: 'visible', timeout: 2000 }).catch(() => null)
+            if (!emailField) {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Email field not found', 'warn')
+                return
+            }
+
+            await this.bot.utils.wait(1000)
+
+            // Check if email is prefilled
+            const emailPrefilled = await page.waitForSelector('#userDisplayName', { timeout: 5000 }).catch(() => null)
+            if (emailPrefilled) {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Email already prefilled by Microsoft')
+            } else {
+                // Else clear and fill email
+                await page.fill(emailInputSelector, '')
+                await this.bot.utils.wait(500)
+                await page.fill(emailInputSelector, email)
+                await this.bot.utils.wait(1000)
+            }
+
+            const nextButton = await page.waitForSelector('button[type="submit"]', { timeout: 2000 }).catch(() => null)
+            if (nextButton) {
+                await nextButton.click()
+                await this.bot.utils.wait(2000)
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Email entered successfully')
+            } else {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Next button not found after email entry', 'warn')
+            }
+
+        } catch (error) {
+            this.bot.log(this.bot.isMobile, 'LOGIN', `Email entry failed: ${error}`, 'error')
+        }
     }
 
     private async enterPassword(page: Page, password: string) {
+        const passwordInputSelector = 'input[type="password"]'
         try {
-            await page.waitForSelector('#i0118', { state: 'visible', timeout: 2000 })
-            await this.bot.utils.wait(2000)
-            await page.fill('#i0118', password)
-            await page.click('#idSIButton9')
-            this.bot.log(this.bot.isMobile, 'LOGIN', 'Password entered successfully')
-        } catch {
-            this.bot.log(this.bot.isMobile, 'LOGIN', 'Password entry failed or 2FA required')
+            const viewFooter = await page.waitForSelector('[data-testid="viewFooter"]', { timeout: 2000 }).catch(() => null)
+            if (viewFooter) {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Page "Get a code to sign in" found by "viewFooter"')
+
+                const otherWaysButton = await viewFooter.$('span[role="button"]')
+                if (otherWaysButton) {
+                    await otherWaysButton.click()
+                    await this.bot.utils.wait(5000)
+
+                    const secondListItem = page.locator('[role="listitem"]').nth(1)
+                    if (await secondListItem.isVisible()) {
+                        await secondListItem.click()
+                    }
+
+                }
+            }
+
+            // Wait for password field
+            const passwordField = await page.waitForSelector(passwordInputSelector, { state: 'visible', timeout: 5000 }).catch(() => null)
+            if (!passwordField) {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Password field not found, possibly 2FA required', 'warn')
+                await this.handle2FA(page)
+                return
+            }
+
+            await this.bot.utils.wait(1000)
+
+            // Clear and fill password
+            await page.fill(passwordInputSelector, '')
+            await this.bot.utils.wait(500)
+            await page.fill(passwordInputSelector, password)
+            await this.bot.utils.wait(1000)
+
+            const nextButton = await page.waitForSelector('button[type="submit"]', { timeout: 2000 }).catch(() => null)
+            if (nextButton) {
+                await nextButton.click()
+                await this.bot.utils.wait(2000)
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Password entered successfully')
+            } else {
+                this.bot.log(this.bot.isMobile, 'LOGIN', 'Next button not found after password entry', 'warn')
+            }
+
+        } catch (error) {
+            this.bot.log(this.bot.isMobile, 'LOGIN', `Password entry failed: ${error}`, 'error')
             await this.handle2FA(page)
         }
     }
@@ -127,7 +194,7 @@ export class Login {
 
     private async get2FACode(page: Page): Promise<string | null> {
         try {
-            const element = await page.waitForSelector('#displaySign', { state: 'visible', timeout: 2000 })
+            const element = await page.waitForSelector('#displaySign, div[data-testid="displaySign"]>span', { state: 'visible', timeout: 2000 })
             return await element.textContent()
         } catch {
             if (this.bot.config.parallel) {
@@ -138,7 +205,7 @@ export class Login {
                 while (true) {
                     const button = await page.waitForSelector('button[aria-describedby="pushNotificationsTitle errorDescription"]', { state: 'visible', timeout: 2000 }).catch(() => null)
                     if (button) {
-                        await this.bot.utils.wait(60_000)
+                        await this.bot.utils.wait(60000)
                         await button.click()
 
                         continue
@@ -148,9 +215,9 @@ export class Login {
                 }
             }
 
-            await page.click('button[aria-describedby="confirmSendTitle"]').catch(() => {})
+            await page.click('button[aria-describedby="confirmSendTitle"]').catch(() => { })
             await this.bot.utils.wait(2000)
-            const element = await page.waitForSelector('#displaySign', { state: 'visible', timeout: 2000 })
+            const element = await page.waitForSelector('#displaySign, div[data-testid="displaySign"]>span', { state: 'visible', timeout: 2000 })
             return await element.textContent()
         }
     }
@@ -162,7 +229,7 @@ export class Login {
                 this.bot.log(this.bot.isMobile, 'LOGIN', `Press the number ${numberToPress} on your Authenticator app to approve the login`)
                 this.bot.log(this.bot.isMobile, 'LOGIN', 'If you press the wrong number or the "DENY" button, try again in 60 seconds')
 
-                await page.waitForSelector('#i0281', { state: 'detached', timeout: 60_000 })
+                await page.waitForSelector('form[name="f1"]', { state: 'detached', timeout: 60000 })
 
                 this.bot.log(this.bot.isMobile, 'LOGIN', 'Login successfully approved!')
                 break
@@ -189,13 +256,65 @@ export class Login {
         this.bot.log(this.bot.isMobile, 'LOGIN', '2FA code entered successfully')
     }
 
+    async getMobileAccessToken(page: Page, email: string) {
+        const authorizeUrl = new URL(this.authBaseUrl)
+
+        authorizeUrl.searchParams.append('response_type', 'code')
+        authorizeUrl.searchParams.append('client_id', this.clientId)
+        authorizeUrl.searchParams.append('redirect_uri', this.redirectUrl)
+        authorizeUrl.searchParams.append('scope', this.scope)
+        authorizeUrl.searchParams.append('state', crypto.randomBytes(16).toString('hex'))
+        authorizeUrl.searchParams.append('access_type', 'offline_access')
+        authorizeUrl.searchParams.append('login_hint', email)
+
+        await page.goto(authorizeUrl.href)
+
+        let currentUrl = new URL(page.url())
+        let code: string
+
+        this.bot.log(this.bot.isMobile, 'LOGIN-APP', 'Waiting for authorization...')
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            if (currentUrl.hostname === 'login.live.com' && currentUrl.pathname === '/oauth20_desktop.srf') {
+                code = currentUrl.searchParams.get('code')!
+                break
+            }
+
+            currentUrl = new URL(page.url())
+            await this.bot.utils.wait(5000)
+        }
+
+        const body = new URLSearchParams()
+        body.append('grant_type', 'authorization_code')
+        body.append('client_id', this.clientId)
+        body.append('code', code)
+        body.append('redirect_uri', this.redirectUrl)
+
+        const tokenRequest: AxiosRequestConfig = {
+            url: this.tokenUrl,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            data: body.toString()
+        }
+
+        const tokenResponse = await this.bot.axios.request(tokenRequest)
+        const tokenData: OAuth = await tokenResponse.data
+
+        this.bot.log(this.bot.isMobile, 'LOGIN-APP', 'Successfully authorized')
+        return tokenData.access_token
+    }
+
+    // Utils
+
     private async checkLoggedIn(page: Page) {
         const targetHostname = 'rewards.bing.com'
         const targetPathname = '/'
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            await this.bot.browser.utils.tryDismissAllMessages(page)
+            await this.dismissLoginMessages(page)
             const currentURL = new URL(page.url())
             if (currentURL.hostname === targetHostname && currentURL.pathname === targetPathname) {
                 break
@@ -203,8 +322,31 @@ export class Login {
         }
 
         // Wait for login to complete
-        await page.waitForSelector('html[data-role-name="RewardsPortal"]', { timeout: 10_000 })
+        await page.waitForSelector('html[data-role-name="RewardsPortal"]', { timeout: 10000 })
         this.bot.log(this.bot.isMobile, 'LOGIN', 'Successfully logged into the rewards portal')
+    }
+
+    private async dismissLoginMessages(page: Page) {
+        // Use Passekey
+        if (await page.waitForSelector('[data-testid="biometricVideo"]', { timeout: 2000 }).catch(() => null)) {
+            const skipButton = await page.$('[data-testid="secondaryButton"]')
+            if (skipButton) {
+                await skipButton.click()
+                this.bot.log(this.bot.isMobile, 'DISMISS-ALL-LOGIN-MESSAGES', 'Dismissed "Use Passekey" modal')
+                await page.waitForTimeout(500)
+            }
+        }
+
+        // Use Keep me signed in
+        if (await page.waitForSelector('[data-testid="kmsiVideo"]', { timeout: 2000 }).catch(() => null)) {
+            const yesButton = await page.$('[data-testid="primaryButton"]')
+            if (yesButton) {
+                await yesButton.click()
+                this.bot.log(this.bot.isMobile, 'DISMISS-ALL-LOGIN-MESSAGES', 'Dismissed "Keep me signed in" modal')
+                await page.waitForTimeout(500)
+            }
+        }
+
     }
 
     private async checkBingLogin(page: Page): Promise<void> {
@@ -243,56 +385,6 @@ export class Login {
         } catch (error) {
             return false
         }
-    }
-
-    async getMobileAccessToken(page: Page, email: string) {
-        const authorizeUrl = new URL(this.authBaseUrl)
-
-        authorizeUrl.searchParams.append('response_type', 'code')
-        authorizeUrl.searchParams.append('client_id', this.clientId)
-        authorizeUrl.searchParams.append('redirect_uri', this.redirectUrl)
-        authorizeUrl.searchParams.append('scope', this.scope)
-        authorizeUrl.searchParams.append('state', crypto.randomBytes(16).toString('hex'))
-        authorizeUrl.searchParams.append('access_type', 'offline_access')
-        authorizeUrl.searchParams.append('login_hint', email)
-
-        await page.goto(authorizeUrl.href)
-
-        let currentUrl = new URL(page.url())
-        let code: string
-
-        this.bot.log(this.bot.isMobile, 'LOGIN-APP', 'Waiting for authorization...')
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            if (currentUrl.hostname === 'login.live.com' && currentUrl.pathname === '/oauth20_desktop.srf') {
-                code = currentUrl.searchParams.get('code')!
-                break
-            }
-
-            currentUrl = new URL(page.url())
-            await this.bot.utils.wait(5000)
-        }
-       
-        const body = new URLSearchParams()
-        body.append('grant_type', 'authorization_code')
-        body.append('client_id', this.clientId)
-        body.append('code', code)
-        body.append('redirect_uri', this.redirectUrl)
-
-        const tokenRequest: AxiosRequestConfig = {
-            url: this.tokenUrl,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            data: body.toString()
-        }
-
-        const tokenResponse = await this.bot.axios.request(tokenRequest)
-        const tokenData: OAuth = await tokenResponse.data
-
-        this.bot.log(this.bot.isMobile, 'LOGIN-APP', 'Successfully authorized')
-        return tokenData.access_token
     }
 
     private async checkAccountLocked(page: Page) {

@@ -11,7 +11,7 @@ export default class BrowserUtil {
         this.bot = bot
     }
 
-    async tryDismissAllMessages(page: Page): Promise<boolean> {
+    async tryDismissAllMessages(page: Page): Promise<void> {
         const buttons = [
             { selector: '#acceptButton', label: 'AcceptButton' },
             { selector: '.ext-secondary.ext-button', label: '"Skip for now" Button' },
@@ -23,27 +23,23 @@ export default class BrowserUtil {
             { selector: '.ms-Button.ms-Button--primary', label: 'Primary Button' },
             { selector: '.c-glyph.glyph-cancel', label: 'Mobile Welcome Button' },
             { selector: '.maybe-later', label: 'Mobile Rewards App Banner' },
-            { selector: '//div[@id="cookieConsentContainer"]//button[contains(text(), "Accept")]', label: 'Accept Cookie Consent Container' },
+            { selector: '//div[@id="cookieConsentContainer"]//button[contains(text(), "Accept")]', label: 'Accept Cookie Consent Container', isXPath: true },
             { selector: '#bnp_btn_accept', label: 'Bing Cookie Banner' },
             { selector: '#reward_pivot_earn', label: 'Reward Coupon Accept' }
         ]
 
-        const dismissTasks = buttons.map(async (button) => {
+        for (const button of buttons) {
             try {
-                const element = page.locator(button.selector)
-                if (await element.first().isVisible({ timeout: 1000 })) {
-                    await element.first().click({ timeout: 1000 })
-                    this.bot.log(this.bot.isMobile, 'DISMISS-ALL-MESSAGES', `Dismissed: ${button.label}`)
-                    return true
-                }
-            } catch (error) {
-                // Ignore errors and continue
-            }
-            return false
-        })
+                const element = button.isXPath ? page.locator(`xpath=${button.selector}`) : page.locator(button.selector)
+                await element.first().click({ timeout: 500 })
+                await page.waitForTimeout(500)
 
-        const results = await Promise.allSettled(dismissTasks)
-        return results.some(result => result.status === 'fulfilled' && result.value === true)
+                this.bot.log(this.bot.isMobile, 'DISMISS-ALL-MESSAGES', `Dismissed: ${button.label}`)
+
+            } catch (error) {
+                // Silent fail
+            }
+        }
     }
 
     async getLatestTab(page: Page): Promise<Page> {
