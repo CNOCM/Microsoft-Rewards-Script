@@ -94,7 +94,7 @@ export class Workers {
             morePromotions.push(data.promotionalItem as unknown as MorePromotion)
         }
 
-        const activitiesUncompleted = morePromotions?.filter(x => !x.complete && x.pointProgressMax > 0 && x.exclusiveLockedFeatureStatus !== 'locked') ?? []
+        const activitiesUncompleted = morePromotions?.filter(x => !x.complete && x.pointProgressMax > 0 && x.exclusiveLockedFeatureStatus !== 'locked' && ['quiz', 'urlreward'].includes(x.promotionType) && x.pointProgress < x.pointProgressMax) ?? []
 
         if (!activitiesUncompleted.length) {
             this.bot.log(this.bot.isMobile, 'MORE-PROMOTIONS', 'All "More Promotion" items have already been completed')

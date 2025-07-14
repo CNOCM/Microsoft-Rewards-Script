@@ -159,12 +159,12 @@ export class MicrosoftRewardsBot {
 
         log(this.isMobile, 'MAIN-POINTS', `Current point count: ${this.pointsInitial}`)
 
-        const browserEnarablePoints = await this.browser.func.getBrowserEarnablePoints()
+        const browserEarnablePoints = await this.browser.func.getBrowserEarnablePoints()
 
         // Tally all the desktop points
-        this.pointsCanCollect = browserEnarablePoints.dailySetPoints +
-            browserEnarablePoints.desktopSearchPoints
-            + browserEnarablePoints.morePromotionsPoints
+        this.pointsCanCollect = browserEarnablePoints.dailySetPoints +
+            browserEarnablePoints.desktopSearchPoints
+            + browserEarnablePoints.morePromotionsPoints
 
         log(this.isMobile, 'MAIN-POINTS', `You can earn ${this.pointsCanCollect} points today`)
 

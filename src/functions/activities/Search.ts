@@ -4,7 +4,8 @@ import { platform } from 'os'
 import { Workers } from '../Workers'
 
 import { Counters, DashboardData } from '../../interface/DashboardData'
-import { GoogleSearch } from '../../interface/Search'
+import { CNTrends } from '../../interface/DailyTrends'
+import { BingSearch, GoogleSearch, CNSearch } from '../../interface/Search'
 import { AxiosRequestConfig } from 'axios'
 
 type GoogleTrendsResponse = [
@@ -34,11 +35,10 @@ export class Search extends Workers {
         }
 
         // Generate search queries
-        let googleSearchQueries = await this.getGoogleTrends(this.bot.config.searchSettings.useGeoLocaleQueries ? data.userProfile.attributes.country : 'US')
-        googleSearchQueries = this.bot.utils.shuffleArray(googleSearchQueries)
+        const [, geo] = await this.bot.browser.func.getGeoLocale()
 
-        // Deduplicate the search terms
-        googleSearchQueries = [...new Set(googleSearchQueries)]
+        let SearchQueries: BingSearch[] = await this.getTrends(geo, missingPoints)
+        SearchQueries = [...new Set(this.bot.utils.shuffleArray(SearchQueries))]
 
         // Go to bing
         await page.goto(this.searchPageURL ? this.searchPageURL : this.bingHome)
@@ -49,11 +49,19 @@ export class Search extends Workers {
 
         let maxLoop = 0 // If the loop hits 10 this when not gaining any points, we're assuming it's stuck. If it doesn't continue after 5 more searches with alternative queries, abort search
 
-        const queries: string[] = []
         // Mobile search doesn't seem to like related queries?
-        googleSearchQueries.forEach(x => { this.bot.isMobile ? queries.push(x.topic) : queries.push(x.topic, ...x.related) })
+        const queries = SearchQueries.flatMap(search => {
+            if ('GoogleSearch' in search) {
+                const { topic, related } = search.GoogleSearch
+                return this.bot.isMobile ? [topic] : [topic, ...related]
+            } else if ('CNSearch' in search) {
+                return [search.CNSearch.title]
+            } else {
+                throw new Error('Unexpected search type')
+            }
+        })
 
-        // Loop over Google search queries
+        // Loop over search queries
         for (let i = 0; i < queries.length; i++) {
             const query = queries[i] as string
 
@@ -100,10 +108,12 @@ export class Search extends Workers {
 
             let i = 0
             while (missingPoints > 0) {
-                const query = googleSearchQueries[i++] as GoogleSearch
+                const query = queries[i++]
+
+                if (!query) return
 
                 // Get related search terms to the Google search queries
-                const relatedTerms = await this.getRelatedTerms(query?.topic)
+                const relatedTerms = await this.getRelatedTerms(query)
                 if (relatedTerms.length > 3) {
                     // Search for the first 2 related terms
                     for (const term of relatedTerms.slice(1, 3)) {
@@ -211,9 +221,50 @@ export class Search extends Workers {
         return await this.bot.browser.func.getSearchPoints()
     }
 
+    public async getTrends(geoLocale: string, queryCount: number): Promise<BingSearch[]> {
+        if (geoLocale === 'CN') {
+            const cnTrends: CNSearch[] = await this.getCNTrends(queryCount)
+            return cnTrends.map(cnTrend => ({ CNSearch: cnTrend }))
+        } else {
+            const googleTrends: GoogleSearch[] = await this.getGoogleTrends(geoLocale)
+            return googleTrends.map(googleTrend => ({ GoogleSearch: googleTrend }))
+        }
+    }
+
+    private async getCNTrends(queryCount: number): Promise<CNSearch[]> {
+        const queryTerms: CNSearch[] = []
+
+        this.bot.log(this.bot.isMobile, 'SEARCH-TRENDS', `Generating search queries, can take a while! | GeoLocale: 'CN'`)
+
+        try {
+            const request: AxiosRequestConfig = {
+                url: `https://api-hot.imsyy.top/baidu?limit=${queryCount}&cache=false`,
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+
+            const response = await this.bot.axios.request(request)
+
+            const data: CNTrends = response.data
+
+            for (const topic of data.data ?? []) {
+                queryTerms.push({
+                    title: topic.title.toLowerCase()
+                })
+            }
+
+        } catch (error) {
+            this.bot.log(this.bot.isMobile, 'SEARCH-TRENDS', `An error occurred: ${error}`, 'error')
+        }
+
+        return queryTerms
+    }
+
     private async getGoogleTrends(geoLocale: string = 'US'): Promise<GoogleSearch[]> {
         const queryTerms: GoogleSearch[] = []
-        this.bot.log(this.bot.isMobile, 'SEARCH-GOOGLE-TRENDS', `Generating search queries, can take a while! | GeoLocale: ${geoLocale}`)
+        this.bot.log(this.bot.isMobile, 'SEARCH-GOOGLE-TRENDS', `Generating search queries, can take a while! | GeoLocale: '${geoLocale}'`)
 
         try {
             const request: AxiosRequestConfig = {
@@ -230,7 +281,7 @@ export class Search extends Workers {
 
             const trendsData = this.extractJsonFromResponse(rawText)
             if (!trendsData) {
-               throw  this.bot.log(this.bot.isMobile, 'SEARCH-GOOGLE-TRENDS', 'Failed to parse Google Trends response', 'error')
+                throw this.bot.log(this.bot.isMobile, 'SEARCH-GOOGLE-TRENDS', 'Failed to parse Google Trends response', 'error')
             }
 
             const mappedTrendsData = trendsData.map(query => [query[0], query[9]!.slice(1)])

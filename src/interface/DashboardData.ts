@@ -244,6 +244,8 @@ export interface PromotionalItem {
     legalText: string;
     legalLinkText: string;
     deviceType: string;
+    exclusiveLockedFeatureType: string | null;
+    exclusiveLockedFeatureStatus: string | null;
 }
 
 export interface PromotionalItemAttributes {

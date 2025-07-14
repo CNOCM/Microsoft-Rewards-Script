@@ -208,16 +208,13 @@ export default class BrowserFunc {
                 'Gamification_Sapphire_DailyCheckIn'
             ]
 
-            const data = await this.getDashboardData()
-            let geoLocale = data.userProfile.attributes.country
-            geoLocale = (this.bot.config.searchSettings.useGeoLocaleQueries && geoLocale.length === 2) ? geoLocale.toLowerCase() : 'us'
-
+            const [, geo] = await this.getGeoLocale()
             const userDataRequest: AxiosRequestConfig = {
                 url: 'https://prod.rewardsplatform.microsoft.com/dapi/me?channel=SAAndroid&options=613',
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${accessToken}`,
-                    'X-Rewards-Country': geoLocale,
+                    'X-Rewards-Country': geo.toLocaleLowerCase(),
                     'X-Rewards-Language': 'en'
                 }
             }
@@ -355,6 +352,34 @@ export default class BrowserFunc {
             this.bot.log(this.bot.isMobile, 'CLOSE-BROWSER', 'Browser closed cleanly!')
         } catch (error) {
             throw this.bot.log(this.bot.isMobile, 'CLOSE-BROWSER', 'An error occurred:' + error, 'error')
+        }
+    }
+
+    async getGeoLocale(): Promise<[string, string]> {
+        const defaultLang = this.bot.config.searchSettings.defaultLang
+        const defaultGeo = this.bot.config.searchSettings.defaultGeo
+
+        if (!this.bot.config.searchSettings.useGeoLocaleQueries) {
+            return [defaultLang, defaultGeo]
+        }
+
+        try {
+
+            const request = {
+                url: 'https://ipapi.co/json/',
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+            const response = await this.bot.axios.request(request)
+            const nfo = response.data
+            const lang = (nfo.languages as string)?.split(',')[0] ?? defaultLang
+            const geo = (nfo.country as string) ?? defaultGeo
+            return [lang, geo]
+        } catch (error) {
+            this.bot.log(this.bot.isMobile, 'GET-GEOLOCALE', 'An error occurred: ' + error, 'error')
+            return [defaultLang, defaultGeo]
         }
     }
 }
